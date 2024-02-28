@@ -114,7 +114,7 @@ def main(fabric: L.Fabric, data_dir: Path, checkpoint_dir: Path, out_dir: Path, 
     }
 
     if resume is True:
-        resume = max(out_dir.glob("*.pth"), key=(lambda p: int(p.name.split("-")[1])))
+        resume = max(out_dir.glob("*.pth"), key=(lambda p: int(p.name.split("-")[1].split(".")[0])))
     if resume:
         fabric.print(f"Resuming training from {resume}")
         fabric.load(resume, state)

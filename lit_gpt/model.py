@@ -11,6 +11,7 @@ from typing import Any, Optional, Tuple
 
 import torch
 import torch.nn as nn
+from torch import einsum
 from typing_extensions import Self
 
 from lit_gpt.config import Config
@@ -223,11 +224,31 @@ class CausalSelfAttention(nn.Module):
             k, v = self.kv_cache(input_pos, k, v)
 
         y = self.scaled_dot_product_attention(q, k, v, mask)
+        # y = self.linear_attention(q,k,v,mask)
 
         y = y.reshape(B, T, self.config.n_embd)  # re-assemble all head outputs side by side
 
         # output projection
         return self.proj(y)
+
+    def linear_attention(
+            self, q: torch.Tensor, k: torch.Tensor, v:torch.Tensor, mask: Optional[torch.Tensor] = None
+            ) -> torch.Tensor:
+        dim = q.shape[-1]
+        if mask is not None: 
+            attn_mask = mask
+            k = k.masked_fill_(~attn_mask, float("-inf"))
+            v = v.masked_fill_(~attn_mask, 0.)
+            del attn_mask
+
+        q = q.softmax(dim=-1)
+        k = k.softmax(dim=-2)
+
+        q = q * dim ** -0.5
+
+        context = einsum('bhnd,bhne->bhde',k,v)
+        attn = einsum('bhnd,bhde->bhne', q, context)
+        return attn
 
     def scaled_dot_product_attention(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: Optional[torch.Tensor] = None
