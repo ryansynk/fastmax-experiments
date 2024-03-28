@@ -9,6 +9,7 @@ from typing import Dict, List, Literal, Optional, Tuple
 import lightning as L
 import torch
 from lightning.fabric.loggers import CSVLogger
+from lightning.pytorch.loggers import WandbLogger
 from lightning.fabric.plugins import BitsandbytesPrecision
 from lightning.fabric.strategies import FSDPStrategy
 from lightning.fabric.utilities import ThroughputMonitor
@@ -29,7 +30,7 @@ from lit_gpt.utils import (
     load_checkpoint,
     num_parameters,
 )
-from scripts.prepare_alpaca import generate_prompt
+from scripts.prepare_flan import generate_prompt
 
 
 def setup(
@@ -53,9 +54,9 @@ def setup(
     ),
     train: TrainArgs = TrainArgs(
         save_interval=1000,
-        log_interval=1,
+        log_interval=10,
         global_batch_size=128,
-        micro_batch_size=4,
+        micro_batch_size=1,
         lr_warmup_steps=100,
         epochs=5,
         epoch_size=50000,
@@ -91,8 +92,9 @@ def setup(
     else:
         strategy = "auto"
 
-    logger = CSVLogger(io.out_dir.parent, io.out_dir.name, flush_logs_every_n_steps=train.log_interval)
-    fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=logger, plugins=plugins)
+    # csv_logger = CSVLogger(io.out_dir.parent, io.out_dir.name, flush_logs_every_n_steps=train.log_interval)
+    wandb_logger= WandbLogger(name=io.checkpoint_dir.name +'_Lora_Q_' + str(quantize) + '_' + io.train_data_dir.name, entity='fast-attention', project='cmsc720')
+    fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=[wandb_logger], plugins=plugins)
 
     if not any((lora_query, lora_key, lora_value, lora_projection, lora_mlp, lora_head)):
         fabric.print("Warning: all LoRA layers are disabled!")
@@ -233,12 +235,14 @@ def fit(
                 f"iter {iter_num} | step {step_count}: loss {loss_item:.4f}, iter time:"
                 f" {(t1 - iter_t0) * 1000:.2f} ms{' (optimizer.step)' if not is_accumulating else ''}"
             )
+            fabric.log_dict({"iter": iter_num, "step": step_count, "loss": loss_item, "iter time": (t1 - iter_t0) * 1000, "optimizer_step": not is_accumulating})
 
         if not is_accumulating and step_count % eval.interval == 0:
             t0 = time.perf_counter()
             val_loss = validate(fabric, model, val_data, tokenizer, eval, train)
             t1 = time.perf_counter() - t0
             fabric.print(f"iter {iter_num}: val loss {val_loss.item():.4f}, val time: {t1 * 1000:.2f} ms")
+            fabric.log_dict({"iter": iter_num, "step": step_count, "loss": loss_item, "iter time": (t1 - iter_t0) * 1000})
             fabric.barrier()
         if not is_accumulating and step_count % train.save_interval == 0:
             checkpoint_path = io.out_dir / f"iter-{iter_num:06d}-ckpt.pth"
