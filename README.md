@@ -1,6 +1,16 @@
 <div align="center">
 <img src="https://pl-public-data.s3.amazonaws.com/assets_lightning/LitStableLM_Badge.png" alt="Lit-GPT" width="128"/>
 
+# Notes for CMSC720 project
+## Getting started:
+```
+conda env create -n cmsc720 python=3.10
+conda activate cmsc720
+pip install -r requirements-all.txt
+python setup_fast.py install
+```
+(That last line for building the fastmax binaries takes about 30 minutes.)
+
 # ⚡ Lit-GPT
 
 <!--
