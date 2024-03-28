@@ -16,6 +16,16 @@ from typing_extensions import Self
 
 from lit_gpt.config import Config
 
+from torch.cuda.amp import autocast
+from functools import partial
+from fast_transformers.causal_product import CausalDotProduct
+from contextlib import contextmanager
+
+
+@contextmanager
+def null_context():
+    yield
+
 
 class GPT(nn.Module):
     def __init__(self, config: Config) -> None:
@@ -226,33 +236,44 @@ class CausalSelfAttention(nn.Module):
             if not isinstance(self.kv_cache, KVCache):
                 raise TypeError("You need to call `gpt.set_kv_cache()`")
             k, v = self.kv_cache(input_pos, k, v)
-
-        y = self.scaled_dot_product_attention(q, k, v, mask)
-        # y = self.linear_attention(q,k,v,mask)
+        attn_alg = "performer"
+        if attn_alg == "quadratic":
+            y = self.scaled_dot_product_attention(q, k, v, mask)
+        elif attn_alg == "performer":
+            y = self.performer_attention(q,k,v,input_pos)
 
         y = y.reshape(B, T, self.config.head_size * self.config.n_head)  # re-assemble all head outputs side by side
 
         # output projection
         return self.proj(y)
 
-    def linear_attention(
-            self, q: torch.Tensor, k: torch.Tensor, v:torch.Tensor, mask: Optional[torch.Tensor] = None
+    def performer_attention(
+            self, q: torch.Tensor, k: torch.Tensor, v:torch.Tensor, input_pos: Optional[torch.Tensor] = None, eps=1e-6
             ) -> torch.Tensor:
-        dim = q.shape[-1]
-        if mask is not None: 
-            attn_mask = mask
-            k = k.masked_fill_(~attn_mask, float("-inf"))
-            v = v.masked_fill_(~attn_mask, 0.)
-            del attn_mask
+        autocast_enabled = torch.is_autocast_enabled()
+        # is_half = isinstance(q, torch.cuda.HalfTensor)
+        # if is_half: assert APEX_AVAILABLE, 'half tensors can only be used if nvidia apex is available'
+        cuda_context = null_context if not autocast_enabled else partial(autocast, enabled=False)
 
-        q = q.softmax(dim=-1)
-        k = k.softmax(dim=-2)
+        #print(autocast_enabled)
+        k = k[:,:,:q.size(dim=2), :]
+        v = v[:,:,:q.size(dim=2), :]
 
-        q = q * dim ** -0.5
-
-        context = einsum('bhnd,bhne->bhde',k,v)
-        attn = einsum('bhnd,bhde->bhne', q, context)
-        return attn
+        k_cumsum = k.cumsum(dim=-2) + eps 
+        D_inv = 1. / torch.einsum('...nd,...nd->...n', q, k_cumsum.type_as(q))
+        Q = q.float()
+        K = k.float()
+        V = v.float()
+        causal_dot_product_fn = CausalDotProduct.apply        
+        # q, k, v = map(lambda t: t.float(), (q, k, v))
+        # with torch.autocast('cuda', torch.bfloat16, enabled=True):
+        #     print(q.dtype, k.dtype, v.dtype)
+        #     print(torch.mm(torch.randn(3,4), torch.randn(4,5)).dtype)
+        #     out = causal_dot_product_fn(q + eps, k + eps, v + eps)
+        out = causal_dot_product_fn(Q, K, V)
+        out = out.to(torch.float16)
+        out = torch.einsum('...nd,...n->...nd', out, D_inv)
+        return out
 
     def scaled_dot_product_attention(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: Optional[torch.Tensor] = None
