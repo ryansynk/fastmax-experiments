@@ -15,13 +15,10 @@ gpt_root="/nfshomes/jrober23/Documents/lit-gpt"
 scratch_root="/fs/nexus-scratch/jrober23"
 
 # set up PyEnvironment
-source /fs/nexus-scratch/jrober23/PyEnvs/FMMAttention/bin/activate
-module load Python3
+source $scratch_root/PyEnvs/Lit-GPT/bin/activate
 
 # make sure your environment has the huggingface_hub[hr_transfer] (see lit-gpt tutorials for pip command)
 
-# download TinyLlama (there is also an intermediate step that does not require safetensors flag)
-# TinyLlama-1.1B-intermediate-step-1431k-3T (replace the chat with this if you want)
 python3 $gpt_root/scripts/download.py --repo_id meta-llama/Llama-2-7b-hf --access_token ***YOUR TOKEN HERE*** --checkpoint_dir $scratch_root/checkpoints
 
 # convert the checkpoint to lit-gpt format
