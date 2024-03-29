@@ -26,6 +26,7 @@
 conda env create -n cmsc720 python=3.10
 conda activate cmsc720
 pip install -r requirements-all.txt
+module load gcc
 python setup_fast.py install
 ```
 (That last line for building the fastmax binaries takes about 30 minutes.)
