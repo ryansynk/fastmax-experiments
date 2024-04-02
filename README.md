@@ -20,6 +20,17 @@
 
 &nbsp;
 
+# Notes for CMSC720 project
+## Getting started:
+```
+conda env create -n cmsc720 python=3.10
+conda activate cmsc720
+pip install -r requirements-all.txt
+module load gcc
+python setup_fast.py install
+```
+(That last line for building the fastmax binaries takes about 30 minutes.)
+
 # ⚡ Lit-GPT
 
 Hackable [implementation](lit_gpt/model.py) of state-of-the-art open-source large language models released under the **Apache 2.0 license**.

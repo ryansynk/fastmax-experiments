@@ -21,6 +21,53 @@ from functools import partial
 from fast_transformers.causal_product import CausalDotProduct
 from contextlib import contextmanager
 
+from ... import fastmax_cpu
+
+class FASTMultiHeadAttention_Function(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, q,k,v,mask,p,normalize,denum_Term):
+        if normalize == 1:
+            # q = q - torch.mean(q,dim = 3).unsqueeze(-1)
+            # k = k - torch.mean(k,dim = 3).unsqueeze(-1)
+            qn = torch.linalg.norm(q, dim = 3)
+            kn = torch.linalg.norm(k, dim = 3)
+            q = q/torch.linalg.norm(qn, dim = 2, ord = float('inf')).unsqueeze(-1).unsqueeze(-1)
+            k = k/torch.linalg.norm(kn, dim = 2, ord = float('inf')).unsqueeze(-1).unsqueeze(-1)
+            k = k/denum_Term
+        else:
+            k = k/(denum_Term*math.sqrt(q.shape[3]))
+
+        o, denum= fastmax_cpu.forwardpass(q,k,v,mask,p)
+        ctx.save_for_backward(q,k,v,o,denum)
+        ctx.mask = mask
+        ctx.p = p
+        return o
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        q,k,v,o,denum = ctx.saved_tensors
+        mask = ctx.mask
+        p = ctx.p
+        grads = fastmax_cpu.backwardpass(q,k,v,o,denum,grad_output,mask,p)
+        return grads[0], grads[1], grads[2]
+
+
+class FASTMultiHeadAttention(torch.nn.Module):
+    def __init__(self, mask = 1, p = 2, normalize = 1, denum_Term = 1):
+        super(FASTMultiHeadAttention, self).__init__()
+        if mask is None or mask == 0: self.mask = 0
+        else: self.mask = 1
+        self.p = p
+        if normalize is None or normalize == 0: self.normalize = 0
+        else: self.normalize = 1
+        self.denum_Term = denum_Term
+
+    def forward(self, q,k,v):
+        return FASTMultiHeadAttention_Function.apply(q,k,v,self.mask,self.p,self.normalize,self.denum_Term)
+
+# the inputs of fastmax are query, key, and value (q,k,v) in shape of  4-dimensional tensors (b, h, n, d); i.e. (batch, head, token length, dimension/channel per head)
+fastmax = FASTMultiHeadAttention()
+linearmax = FASTMultiHeadAttention(p=1)
 
 @contextmanager
 def null_context():
@@ -284,6 +331,14 @@ class CausalSelfAttention(nn.Module):
         )
         return y.transpose(1, 2)
 
+    def linear_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        o = linearmax(q,k,v)
+        return o
+    
+    def fast_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        o = fastmax(q,k,v)
+        return o
+        
     def build_kv_cache(
         self,
         batch_size: int,
