@@ -18,6 +18,7 @@ scratch_root="/fs/nexus-scratch/jrober23"
 source $scratch_root/PyEnvs/Lit-GPT/bin/activate
 
 # make sure your environment has the huggingface_hub[hr_transfer] (see lit-gpt tutorials for pip command)
+# (this is taken care of in requirements-cmsc720.txt)
 
 python3 $gpt_root/scripts/download.py --repo_id meta-llama/Llama-2-7b-hf --access_token ***YOUR TOKEN HERE*** --checkpoint_dir $scratch_root/checkpoints
 
