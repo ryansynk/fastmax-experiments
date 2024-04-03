@@ -21,7 +21,9 @@ from functools import partial
 from fast_transformers.causal_product import CausalDotProduct
 from contextlib import contextmanager
 
-from ... import fastmax_cpu
+from attention_mechanisms.fastmax import fastmax
+
+import fastmax_cpu
 
 class FASTMultiHeadAttention_Function(torch.autograd.Function):
     @staticmethod
@@ -36,8 +38,15 @@ class FASTMultiHeadAttention_Function(torch.autograd.Function):
             k = k/denum_Term
         else:
             k = k/(denum_Term*math.sqrt(q.shape[3]))
-
+        
+        orig_dtype = q.dtype
+        q = q.float()
+        k = k.float()
+        v = v.float()
         o, denum= fastmax_cpu.forwardpass(q,k,v,mask,p)
+        o = o.to(orig_dtype)
+        denum = denum.to(orig_dtype)
+        
         ctx.save_for_backward(q,k,v,o,denum)
         ctx.mask = mask
         ctx.p = p
@@ -48,7 +57,17 @@ class FASTMultiHeadAttention_Function(torch.autograd.Function):
         q,k,v,o,denum = ctx.saved_tensors
         mask = ctx.mask
         p = ctx.p
+
+        orig_dtype = q.dtype
+        q = q.float()
+        k = k.float()
+        v = v.float()
+        o = o.float()
+        denum = denum.float()
+        grad_output = grad_output.float()
         grads = fastmax_cpu.backwardpass(q,k,v,o,denum,grad_output,mask,p)
+        grads = [g.to(orig_dtype) for g in grads]
+
         return grads[0], grads[1], grads[2]
 
 
@@ -66,7 +85,7 @@ class FASTMultiHeadAttention(torch.nn.Module):
         return FASTMultiHeadAttention_Function.apply(q,k,v,self.mask,self.p,self.normalize,self.denum_Term)
 
 # the inputs of fastmax are query, key, and value (q,k,v) in shape of  4-dimensional tensors (b, h, n, d); i.e. (batch, head, token length, dimension/channel per head)
-fastmax = FASTMultiHeadAttention()
+fastmax_cpp = FASTMultiHeadAttention()
 linearmax = FASTMultiHeadAttention(p=1)
 
 @contextmanager
@@ -283,11 +302,20 @@ class CausalSelfAttention(nn.Module):
             if not isinstance(self.kv_cache, KVCache):
                 raise TypeError("You need to call `gpt.set_kv_cache()`")
             k, v = self.kv_cache(input_pos, k, v)
-        attn_alg = "performer"
+        # attn_alg = "performer"
+        attn_alg = self.config.attn_alg
         if attn_alg == "quadratic":
             y = self.scaled_dot_product_attention(q, k, v, mask)
         elif attn_alg == "performer":
             y = self.performer_attention(q,k,v,input_pos)
+        elif attn_alg == "linearmax":
+            y = self.linearmax(q,k,v)
+        elif attn_alg == "linearmax_cpp":
+            y = self.linearmax_cpp(q,k,v)
+        elif attn_alg == "fastmax":
+            y = self.fastmax_cpp(q,k,v)
+        else:
+            raise ValueError(f"Attention algorithm {attn_alg} not supported")
 
         y = y.reshape(B, T, self.config.head_size * self.config.n_head)  # re-assemble all head outputs side by side
 
@@ -331,12 +359,24 @@ class CausalSelfAttention(nn.Module):
         )
         return y.transpose(1, 2)
 
-    def linear_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        o = linearmax(q,k,v)
+    def linearmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        # o = linearmax(q,k,v)
+        o = fastmax(q, k, v, p=1)
         return o
     
-    def fast_attention(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        o = fastmax(q,k,v)
+    def linearmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        q = q.cpu()
+        k = k.cpu()
+        v = v.cpu()
+        o = linearmax(q,k,v)
+        o = o.cuda()
+        return o
+    
+    def fastmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        q = q.cpu()
+        k = k.cpu()
+        v = v.cpu()
+        o = fastmax_cpp(q, k, v)
         return o
         
     def build_kv_cache(

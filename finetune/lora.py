@@ -64,6 +64,7 @@ def setup(
         max_seq_length=None,
     ),
     eval: EvalArgs = EvalArgs(interval=100, max_new_tokens=100, max_iters=100),
+    attn_alg: Optional[str] = "quadratic",
 ) -> None:
     print(locals())
     precision = precision or get_default_supported_precision(training=True)
@@ -112,6 +113,7 @@ def setup(
             to_projection=lora_projection,
             to_mlp=lora_mlp,
             to_head=lora_head,
+            attn_alg=attn_alg,
         ),
         io,
         train,

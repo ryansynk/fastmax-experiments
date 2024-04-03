@@ -224,7 +224,7 @@ def generate_prompt(example):
     return (
         "Below is an instruction that describes a task. "
         "Write a response that appropriately completes the request.\n\n"
-        f"### Instruction:\n{example['inputs']}\n\n### Response:"
+        f"### Instruction:\n{example['input']}\n\n### Response:"
     )
 
 

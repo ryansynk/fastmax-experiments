@@ -61,6 +61,7 @@ class Config:
     rope_base: int = 10000
     n_expert: int = 0
     n_expert_per_token: int = 0
+    attn_alg: Optional[str] = "quadratic",
 
     def __post_init__(self):
         if not self.name:
