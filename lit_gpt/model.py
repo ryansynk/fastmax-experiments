@@ -81,6 +81,11 @@ class FASTMultiHeadAttention(torch.nn.Module):
         else: self.normalize = 1
         self.denum_Term = denum_Term
 
+        self.mask.requires_grad = False
+        self.p.requires_grad = False
+        self.normalize.requires_grad = False
+        self.denum_term.requires_grad = False
+
     def forward(self, q,k,v):
         return FASTMultiHeadAttention_Function.apply(q,k,v,self.mask,self.p,self.normalize,self.denum_Term)
 
