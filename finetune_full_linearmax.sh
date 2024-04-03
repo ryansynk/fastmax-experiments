@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH --job-name=LoraLinearMaxCppFlan                             # Specify a name for your job
-#SBATCH --output=slurm-logs/out-flan-linearmaxcpp-%j.log         # Specify the output log file
+#SBATCH --job-name=LoraLinearMaxFlan                             # Specify a name for your job
+#SBATCH --output=slurm-logs/out-flan-linearmax-%j.log         # Specify the output log file
 #SBATCH --nodes=1                                             # Number of nodes to request
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4                                     # Number of CPU cores per task
@@ -22,4 +22,4 @@ conda activate cmsc720
 
 # run finetune, saving to gpt_root so nexus backs up fine tuned models but leaving base models on scratch
 # python3 finetune/lora.py --io.train_data_dir $scratch_root/data/flan --io.val_data_dir $scratch_root/data/flan --io.checkpoint_dir $scratch_root/checkpoints/meta-llama/Llama-2-7b-hf --io.out_dir $scratch_root/out/lora_weights/Llama2-Flan-Quad-NoQuant --train.micro_batch_size 1 --precision bf16-true --devices 1
-python3 finetune/lora.py --attn_alg linearmax_cpp --io.train_data_dir $scratch_root/data/flan --io.val_data_dir $scratch_root/data/flan --io.checkpoint_dir $scratch_root/checkpoints/meta-llama/Llama-2-7b-hf --io.out_dir $scratch_root/out/lora_weights/Llama2-Flan-Quad-NoQuant --train.micro_batch_size 1 --precision bf16-true --devices 1
+python3 finetune/full.py --attn_alg linearmax --io.train_data_dir $scratch_root/data/alpaca --io.val_data_dir $scratch_root/data/alpaca --io.checkpoint_dir $scratch_root/checkpoints/meta-llama/Llama-2-7b-hf --io.out_dir $scratch_root/out/full_weights/Llama2-alpaca-linearmax-NoQuant --train.micro_batch_size 1 --precision bf16-true --devices 1

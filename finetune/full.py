@@ -54,6 +54,7 @@ def setup(
         max_seq_length=None,
     ),
     eval: EvalArgs = EvalArgs(interval=600, max_new_tokens=100, max_iters=100),
+    attn_alg: Optional[str] = "quadratic",
 ) -> None:
     print(locals())
     precision = precision or get_default_supported_precision(training=True)
@@ -71,7 +72,7 @@ def setup(
 
     logger = CSVLogger(io.out_dir.parent, io.out_dir.name, flush_logs_every_n_steps=train.log_interval)
     fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=logger)
-    fabric.launch(main, devices, resume, Config.from_name(name=io.checkpoint_dir.name), io, train, eval)
+    fabric.launch(main, devices, resume, Config.from_name(name=io.checkpoint_dir.name, attn_alg=attn_alg), io, train, eval)
 
 
 def main(
