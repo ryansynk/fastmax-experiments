@@ -233,12 +233,6 @@ class fastattention_einops(torch.autograd.Function):
         Returns:
             F: (Tensor) shape (B, H, N, D)
         """
-        if q.shape[2] < k.shape[2]:
-            # Create a tensor of zeros with the same shape as q, but with the second dimension equal to the difference in size
-            # Then concatenate q and the zeros tensor along the second dimension
-            zeros = torch.zeros(q.shape[0], q.shape[1], k.shape[2] - q.shape[2], q.shape[3], device=q.device)
-            q = torch.cat([q, zeros], dim=2)
-
         z1 = torch.cumsum(v, 2)
         F = z1
         

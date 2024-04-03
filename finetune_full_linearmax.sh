@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=LoraLinearMaxFlan                             # Specify a name for your job
-#SBATCH --output=slurm-logs/out-flan-linearmax-%j.log         # Specify the output log file
+#SBATCH --job-name=full_linearmax_alpaca                            # Specify a name for your job
+#SBATCH --output=slurm-logs/full_linearmax_alpaca-%j.log         # Specify the output log file
 #SBATCH --nodes=1                                             # Number of nodes to request
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4                                     # Number of CPU cores per task
+#SBATCH --cpus-per-task=2                                     # Number of CPU cores per task
 #SBATCH --time=24:00:00                                       # Maximum execution time (HH:MM:SS)
 #SBATCH --qos=high                                            # Specify the partition (queue) you want to use
 #SBATCH --gres=gpu:rtxa6000:1                                # Number of GPUs per node
-#SBATCH --mem=128G                                             # Memory per node
+#SBATCH --mem=64G                                             # Memory per node
 
 # Project setup
 

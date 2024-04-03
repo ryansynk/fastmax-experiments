@@ -306,18 +306,24 @@ class CausalSelfAttention(nn.Module):
         attn_alg = self.config.attn_alg
         if attn_alg == "quadratic":
             y = self.scaled_dot_product_attention(q, k, v, mask)
-        elif attn_alg == "performer":
-            y = self.performer_attention(q,k,v,input_pos)
-        elif attn_alg == "linearmax":
-            y = self.linearmax(q,k,v)
-        elif attn_alg == "fastmax":
-            y = self.fastmax(q,k,v)    
-        elif attn_alg == "linearmax_cpp":
-            y = self.linearmax_cpp(q,k,v)
-        elif attn_alg == "fastmax_cpp":
-            y = self.fastmax_cpp(q,k,v)
         else:
-            raise ValueError(f"Attention algorithm {attn_alg} not supported")
+            if q.shape[2] < k.shape[2]:
+                # Create a tensor of zeros with the same shape as q, but with the second dimension equal to the difference in size
+                # Then concatenate q and the zeros tensor along the second dimension
+                zeros = torch.zeros(q.shape[0], q.shape[1], k.shape[2] - q.shape[2], q.shape[3], device=q.device)
+                q = torch.cat([q, zeros], dim=2)
+            if attn_alg == "performer":
+                y = self.performer_attention(q,k,v,input_pos)
+            elif attn_alg == "linearmax":
+                y = self.linearmax(q,k,v)
+            elif attn_alg == "fastmax":
+                y = self.fastmax(q,k,v)    
+            elif attn_alg == "linearmax_cpp":
+                y = self.linearmax_cpp(q,k,v)
+            elif attn_alg == "fastmax_cpp":
+                y = self.fastmax_cpp(q,k,v)
+            else:
+                raise ValueError(f"Attention algorithm {attn_alg} not supported")
 
         y = y.reshape(B, T, self.config.head_size * self.config.n_head)  # re-assemble all head outputs side by side
 
@@ -329,7 +335,11 @@ class CausalSelfAttention(nn.Module):
         return o
     
     def fastmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        q = q.cpu()
+        k = k.cpu()
+        v = v.cpu()
         o = fastmax(q, k, v, p=2)
+        o = o.cuda()
         return o
     
     def linearmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
