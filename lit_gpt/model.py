@@ -86,7 +86,7 @@ class FASTMultiHeadAttention(torch.nn.Module):
 
 # the inputs of fastmax are query, key, and value (q,k,v) in shape of  4-dimensional tensors (b, h, n, d); i.e. (batch, head, token length, dimension/channel per head)
 fastmax_cpp = FASTMultiHeadAttention()
-linearmax = FASTMultiHeadAttention(p=1)
+linearmax_cpp = FASTMultiHeadAttention(p=1)
 
 @contextmanager
 def null_context():
@@ -310,9 +310,11 @@ class CausalSelfAttention(nn.Module):
             y = self.performer_attention(q,k,v,input_pos)
         elif attn_alg == "linearmax":
             y = self.linearmax(q,k,v)
+        elif attn_alg == "fastmax":
+            y = self.fastmax(q,k,v)    
         elif attn_alg == "linearmax_cpp":
             y = self.linearmax_cpp(q,k,v)
-        elif attn_alg == "fastmax":
+        elif attn_alg == "fastmax_cpp":
             y = self.fastmax_cpp(q,k,v)
         else:
             raise ValueError(f"Attention algorithm {attn_alg} not supported")
@@ -321,6 +323,44 @@ class CausalSelfAttention(nn.Module):
 
         # output projection
         return self.proj(y)
+
+    def linearmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        o = fastmax(q, k, v, p=1)
+        return o
+    
+    def fastmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        o = fastmax(q, k, v, p=2)
+        return o
+    
+    def linearmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        q = q.cpu()
+        k = k.cpu()
+        v = v.cpu()
+        o = linearmax_cpp(q,k,v)
+        o = o.cuda()
+        return o
+    
+    def fastmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        q = q.cpu()
+        k = k.cpu()
+        v = v.cpu()
+        o = fastmax_cpp(q, k, v)
+        return o
+    
+    def linearmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        q = q.cpu()
+        k = k.cpu()
+        v = v.cpu()
+        o = linearmax_cpp(q,k,v)
+        o = o.cuda()
+        return o
+    
+    def fastmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        q = q.cpu()
+        k = k.cpu()
+        v = v.cpu()
+        o = fastmax_cpp(q, k, v)
+        return o
 
     def performer_attention(
             self, q: torch.Tensor, k: torch.Tensor, v:torch.Tensor, input_pos: Optional[torch.Tensor] = None, eps=1e-6
@@ -358,26 +398,6 @@ class CausalSelfAttention(nn.Module):
             q, k, v, attn_mask=mask, dropout_p=0.0, scale=scale, is_causal=mask is None
         )
         return y.transpose(1, 2)
-
-    def linearmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        # o = linearmax(q,k,v)
-        o = fastmax(q, k, v, p=1)
-        return o
-    
-    def linearmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        q = q.cpu()
-        k = k.cpu()
-        v = v.cpu()
-        o = linearmax(q,k,v)
-        o = o.cuda()
-        return o
-    
-    def fastmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        q = q.cpu()
-        k = k.cpu()
-        v = v.cpu()
-        o = fastmax_cpp(q, k, v)
-        return o
         
     def build_kv_cache(
         self,

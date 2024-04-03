@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=LoraFastmaxFlan                             # Specify a name for your job
-#SBATCH --output=slurm-logs/out-flan-quad-%j.log         # Specify the output log file
+#SBATCH --output=slurm-logs/out-flan-fastmax-%j.log         # Specify the output log file
 #SBATCH --nodes=1                                             # Number of nodes to request
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4                                     # Number of CPU cores per task
