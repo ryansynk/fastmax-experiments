@@ -22,6 +22,7 @@ from fast_transformers.causal_product import CausalDotProduct
 from contextlib import contextmanager
 
 from attention_mechanisms.fastmax import fastmax
+from attention_mechanisms.fastmax_hack import fastmax_hack
 
 import fastmax_cpu
 
@@ -299,65 +300,81 @@ class CausalSelfAttention(nn.Module):
         if input_pos is not None:
             if not isinstance(self.kv_cache, KVCache):
                 raise TypeError("You need to call `gpt.set_kv_cache()`")
-            k, v = self.kv_cache(input_pos, k, v)
+            k, v = self.kv_cache(input_pos, k, v)  
+
         # attn_alg = "performer"
         attn_alg = self.config.attn_alg
         if attn_alg == "quadratic":
             y = self.scaled_dot_product_attention(q, k, v, mask)
         else:
-            if q.shape[2] < k.shape[2]:
-                # Create a tensor of zeros with the same shape as q, but with the second dimension equal to the difference in size
-                # Then concatenate q and the zeros tensor along the second dimension
-                zeros = torch.zeros(q.shape[0], q.shape[1], k.shape[2] - q.shape[2], q.shape[3], device=q.device)
-                q = torch.cat([q, zeros], dim=2)
+
+
             if attn_alg == "performer":
                 y = self.performer_attention(q,k,v,input_pos)
             elif attn_alg == "linearmax":
-                y = self.linearmax(q,k,v)
+                y = self.linearmax(q, k, v, input_pos)
             elif attn_alg == "fastmax":
-                y = self.fastmax(q,k,v)    
+                y = self.fastmax(q, k, v, input_pos)    
             elif attn_alg == "linearmax_cpp":
-                y = self.linearmax_cpp(q,k,v)
+                y = self.linearmax_cpp(q, k, v, input_pos)
             elif attn_alg == "fastmax_cpp":
-                y = self.fastmax_cpp(q,k,v)
+                y = self.fastmax_cpp(q, k, v, input_pos)
             else:
                 raise ValueError(f"Attention algorithm {attn_alg} not supported")
-        
-        if y.shape[2] > T:
-            # Truncate y to have the same third dimension as T
-            y = y[:, :, :T, :]
+
 
         y = y.reshape(B, T, self.config.head_size * self.config.n_head)  # re-assemble all head outputs side by side
 
         # output projection
         return self.proj(y)
 
-    def linearmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        o = fastmax(q, k, v, p=1)
+    def linearmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
+        # mask = True
+        # if input_pos is not None:
+        #     # We are using KVCache, so we are at inference time and don't need the mask
+        #     mask = False
+        # q = q.cpu()
+        # k = k.cpu()
+        # v = v.cpu()
+        # o = fastmax_hack(q, k, v, p=1, mask=mask)
+        # o = o.cuda()
+        o = fastmax_hack(q, k, v, p=1, mask=False)
         return o
     
-    def fastmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    def fastmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
+        mask = True
+        if input_pos is not None:
+            # We are using KVCache, so we are at inference time and don't need the mask
+            mask = False
         q = q.cpu()
         k = k.cpu()
         v = v.cpu()
-        o = fastmax(q, k, v, p=2)
+        o = fastmax(q, k, v, p=2, mask=mask)
         o = o.cuda()
         return o
     
-    def linearmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    def linearmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
+        mask = True
+        if input_pos is not None:
+            # We are using KVCache, so we are at inference time and don't need the mask
+            mask = False
         q = q.cpu()
         k = k.cpu()
         v = v.cpu()
-        linearmax_cpp = FASTMultiHeadAttention(p=1)
+        linearmax_cpp = FASTMultiHeadAttention(p=1, mask=mask)
         o = linearmax_cpp(q,k,v)
         o = o.cuda()
         return o
     
-    def fastmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    def fastmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
+        mask = True
+        if input_pos is not None:
+            # We are using KVCache, so we are at inference time and don't need the mask
+            mask = False
         q = q.cpu()
         k = k.cpu()
         v = v.cpu()
-        fastmax_cpp = FASTMultiHeadAttention()
+        fastmax_cpp = FASTMultiHeadAttention(mask=mask)
         o = fastmax_cpp(q, k, v)
         o = o.cuda()
         return o
