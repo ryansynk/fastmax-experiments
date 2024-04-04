@@ -39,6 +39,8 @@ def main(
     lora_projection: bool = False,
     lora_mlp: bool = False,
     lora_head: bool = False,
+    attn_alg: Optional[str] = "quadratic",
+
 ) -> None:
     """Generates a response based on a given instruction and an optional input.
     This script will only work with checkpoints from the instruction-tuned GPT-LoRA model.
@@ -86,6 +88,7 @@ def main(
         to_projection=lora_projection,
         to_mlp=lora_mlp,
         to_head=lora_head,
+        attn_alg=attn_alg,
     )
 
     checkpoint_path = checkpoint_dir / "lit_model.pth"
