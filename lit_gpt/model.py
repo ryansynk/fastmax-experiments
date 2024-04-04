@@ -68,7 +68,7 @@ class FASTMultiHeadAttention_Function(torch.autograd.Function):
         grads = fastmax_cpu.backwardpass(q,k,v,o,denum,grad_output,mask,p)
         grads = [g.to(orig_dtype) for g in grads]
 
-        return grads[0], grads[1], grads[2]
+        return grads[0], grads[1], grads[2], None, None, None, None
 
 
 class FASTMultiHeadAttention(torch.nn.Module):
@@ -81,17 +81,10 @@ class FASTMultiHeadAttention(torch.nn.Module):
         else: self.normalize = 1
         self.denum_Term = denum_Term
 
-        self.mask.requires_grad = False
-        self.p.requires_grad = False
-        self.normalize.requires_grad = False
-        self.denum_term.requires_grad = False
-
     def forward(self, q,k,v):
+        # the inputs of fastmax are query, key, and value (q,k,v) in shape of  4-dimensional tensors (b, h, n, d); i.e. (batch, head, token length, dimension/channel per head)
         return FASTMultiHeadAttention_Function.apply(q,k,v,self.mask,self.p,self.normalize,self.denum_Term)
 
-# the inputs of fastmax are query, key, and value (q,k,v) in shape of  4-dimensional tensors (b, h, n, d); i.e. (batch, head, token length, dimension/channel per head)
-fastmax_cpp = FASTMultiHeadAttention()
-linearmax_cpp = FASTMultiHeadAttention(p=1)
 
 @contextmanager
 def null_context():
@@ -329,6 +322,10 @@ class CausalSelfAttention(nn.Module):
                 y = self.fastmax_cpp(q,k,v)
             else:
                 raise ValueError(f"Attention algorithm {attn_alg} not supported")
+        
+        if y.shape[2] > T:
+            # Truncate y to have the same third dimension as T
+            y = y[:, :, :T, :]
 
         y = y.reshape(B, T, self.config.head_size * self.config.n_head)  # re-assemble all head outputs side by side
 
@@ -351,6 +348,7 @@ class CausalSelfAttention(nn.Module):
         q = q.cpu()
         k = k.cpu()
         v = v.cpu()
+        linearmax_cpp = FASTMultiHeadAttention(p=1)
         o = linearmax_cpp(q,k,v)
         o = o.cuda()
         return o
@@ -359,22 +357,9 @@ class CausalSelfAttention(nn.Module):
         q = q.cpu()
         k = k.cpu()
         v = v.cpu()
+        fastmax_cpp = FASTMultiHeadAttention()
         o = fastmax_cpp(q, k, v)
-        return o
-    
-    def linearmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        q = q.cpu()
-        k = k.cpu()
-        v = v.cpu()
-        o = linearmax_cpp(q,k,v)
         o = o.cuda()
-        return o
-    
-    def fastmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-        q = q.cpu()
-        k = k.cpu()
-        v = v.cpu()
-        o = fastmax_cpp(q, k, v)
         return o
 
     def performer_attention(
