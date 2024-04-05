@@ -329,16 +329,16 @@ class CausalSelfAttention(nn.Module):
         return self.proj(y)
 
     def linearmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
-        # mask = True
-        # if input_pos is not None:
-        #     # We are using KVCache, so we are at inference time and don't need the mask
-        #     mask = False
+        mask = True
+        if input_pos is not None:
+            # We are using KVCache, so we are at inference time and don't need the mask
+            mask = False
         # q = q.cpu()
         # k = k.cpu()
         # v = v.cpu()
         # o = fastmax_hack(q, k, v, p=1, mask=mask)
         # o = o.cuda()
-        o = fastmax_hack(q, k, v, p=1, mask=False)
+        o = fastmax_hack(q, k, v, p=1, mask=mask)
         return o
     
     def fastmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:

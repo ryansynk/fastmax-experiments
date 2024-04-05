@@ -18,4 +18,4 @@ WANDB_API_KEY="0ac25eead122887ad5f73d917b545b9ee5e2f3b5"
 source $(conda info --base)/etc/profile.d/conda.sh
 conda activate $scratch_root/LitGPT/
 
-python3 generate/lora.py --prompt "Read me a children bedtime story" --lora_path "/fs/nexus-scratch/jrober23/out/lora_weights/Llama2-Flan-Quad/lit_model_lora_finetuned.pth" --checkpoint_dir "/fs/nexus-scratch/jrober23/checkpoints/meta-llama/Llama-2-7b-hf/" --quantize "bnb.nf4"
+python3 generate/lora.py --prompt "Read me a children bedtime story" --lora_path "/fs/nexus-scratch/jrober23/out/lora_weights/Llama2-Flan-Quad/lit_model_lora_finetuned.pth" --checkpoint_dir "/fs/nexus-scratch/jrober23/checkpoints/meta-llama/Llama-2-7b-hf/" --quantize "bnb.nf4" --attn_alg linearmax
