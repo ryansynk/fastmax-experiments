@@ -23,7 +23,7 @@
 # Notes for CMSC720 project
 ## Getting started:
 ```
-conda env create -n cmsc720 python=3.10
+conda create -n cmsc720 python=3.10
 conda activate cmsc720
 module load gcc
 pip install -r requirements-all.txt
