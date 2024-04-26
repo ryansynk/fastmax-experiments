@@ -27,4 +27,4 @@ conda activate cmsc720
 python3 $gpt_root/scripts/download.py --repo_id TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T --checkpoint_dir $scratch_root/checkpoints
 
 # convert the checkpoint to lit-gpt format
-python3 $gpt_root/scripts/convert_hf_checkpoint.py --checkpoint_dir $scratch_root/checkpoints/meta-llama/Llama-2-7b-hf
+python3 $gpt_root/scripts/convert_hf_checkpoint.py --checkpoint_dir $scratch_root/checkpoints/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T
