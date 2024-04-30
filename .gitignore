@@ -17,3 +17,5 @@ wandb
 events.out.tfevents*
 
 tests/reference_models
+
+slurm-logs

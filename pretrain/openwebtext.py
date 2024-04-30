@@ -199,12 +199,14 @@ def fit(
                 f"iter {iter_num} step {state['step_count']}: loss {loss_item:.4f}, iter time:"
                 f" {(t1 - iter_t0) * 1000:.2f}ms{' (optimizer.step)' if not is_accumulating else ''}"
             )
+            fabric.logger.log_metrics({"loss": loss_item}, step=iter_num)
 
         if not is_accumulating and state["step_count"] % eval.interval == 0:
             t0 = time.perf_counter()
             val_loss = validate(fabric, model, val_dataloader, max_iters=eval.max_iters)
             t1 = time.perf_counter() - t0
             fabric.print(f"step {iter_num}: val loss {val_loss.item():.4f}, val time: {t1 * 1000:.2f}ms")
+            fabric.logger.log_metrics({"val_loss": val_loss.item()}, step=iter_num)
             fabric.barrier()
         if not is_accumulating and state["step_count"] % train.save_interval == 0:
             checkpoint_path = io.out_dir / f"iter-{iter_num:06d}-ckpt.pth"
