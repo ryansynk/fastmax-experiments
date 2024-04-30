@@ -10,6 +10,7 @@ import lightning as L
 import numpy as np
 import torch
 from lightning.fabric.loggers import CSVLogger
+from lightning.pytorch.loggers import WandbLogger
 from lightning.fabric.strategies import FSDPStrategy
 from lightning.fabric.utilities import ThroughputMonitor, measure_flops
 from torch.utils.data import DataLoader, IterableDataset
@@ -61,7 +62,8 @@ def setup(
     else:
         strategy = "auto"
 
-    logger = CSVLogger(io.out_dir.parent, io.out_dir.name, flush_logs_every_n_steps=train.log_interval)
+    # logger = CSVLogger(io.out_dir.parent, io.out_dir.name, flush_logs_every_n_steps=train.log_interval)
+    logger = WandbLogger(name=f"Pretrain_{model_name}", entity='fast-attention', project='fastmax-experiments')
     fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=logger)
 
     fabric.launch(main, devices, resume, Config.from_name(name=model_name), io, train, eval)

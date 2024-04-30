@@ -304,11 +304,16 @@ class CausalSelfAttention(nn.Module):
 
         # attn_alg = "performer"
         attn_alg = self.config.attn_alg
+
+        if not isinstance(attn_alg, str):
+            if isinstance(attn_alg, tuple):
+                attn_alg = attn_alg[0]
+            else:
+                raise ValueError(f"Attention algorithm {attn_alg} has a type problem")
+
         if attn_alg == "quadratic":
             y = self.scaled_dot_product_attention(q, k, v, mask)
         else:
-
-
             if attn_alg == "performer":
                 y = self.performer_attention(q,k,v,input_pos)
             elif attn_alg == "linearmax":
