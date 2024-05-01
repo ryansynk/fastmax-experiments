@@ -9,7 +9,7 @@
 # #SBATCH --account=cml-ramani
 # #SBATCH --partition=cml-dpart
 #SBATCH --qos=high                                            # Specify the partition (queue) you want to use
-#SBATCH --gres=gpu:rtxa6000:1                                # Number of GPUs per node
+#SBATCH --gres=gpu:rtxa5000:1                                # Number of GPUs per node
 #SBATCH --mem=64G                                             # Memory per node
 
 # Project setup
@@ -26,11 +26,11 @@ conda activate cmsc720
 # run finetune, saving to gpt_root so nexus backs up fine tuned models but leaving base models on scratch
 # python3 finetune/lora.py --io.train_data_dir $scratch_root/data/flan --io.val_data_dir $scratch_root/data/flan --io.checkpoint_dir $scratch_root/checkpoints/meta-llama/Llama-2-7b-hf --io.out_dir $scratch_root/out/lora_weights/Llama2-Flan-Quad-NoQuant --train.micro_batch_size 1 --precision bf16-true --devices 1
 python3 finetune/lora.py \
-    --attn_alg fastmax_cuda 
-    --io.train_data_dir $scratch_root/data/flan 
-    --io.val_data_dir $scratch_root/data/flan 
-    --io.checkpoint_dir $scratch_root/checkpoints/meta-llama/Llama-2-7b-hf 
-    --io.out_dir $scratch_root/out/lora_weights/Llama2-Flan-fastmax-NoQuant 
-    --train.micro_batch_size 1 
-    --precision bf16-true 
+    --attn_alg fastmax_cuda \
+    --io.train_data_dir $scratch_root/data/flan \
+    --io.val_data_dir $scratch_root/data/flan \
+    --io.checkpoint_dir $scratch_root/checkpoints/meta-llama/Llama-2-7b-hf \
+    --io.out_dir $scratch_root/out/lora_weights/Llama2-Flan-fastmax-NoQuant \
+    --train.micro_batch_size 1 \
+    --precision bf16-true \
     --devices 1
