@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=PretrainPythia                             # Specify a name for your job
-#SBATCH --output=slurm-logs/pretrain_pythia-%j.log         # Specify the output log file
-#SBATCH --error=slurm-logs/pretrain_pythia-%j.log          # Specify the error log file
+#SBATCH --output=../slurm-logs/pretrain_pythia-%j.log         # Specify the output log file
+#SBATCH --error=../slurm-logs/pretrain_pythia-%j.log          # Specify the error log file
 #SBATCH --nodes=1                                             # Number of nodes to request
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4                                     # Number of CPU cores per task
@@ -21,6 +21,7 @@ conda activate cmsc720
 wandb login
 
 # run finetune, saving to gpt_root so nexus backs up fine tuned models but leaving base models on scratch
+cd ..
 python3 pretrain/openwebtext.py \
     --io.train_data_dir $data_root/data/openwebtext \
     --io.val_data_dir $data_root/data/openwebtext \
