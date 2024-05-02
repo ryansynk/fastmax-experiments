@@ -46,11 +46,15 @@ class FASTMultiHeadAttention_Function(torch.autograd.Function):
         v = v.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
         drop_noise = drop_noise.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
 
+        breakpoint()
+        q = q.to(torch.float32)
+        k = k.to(torch.float32)
+        v = v.to(torch.float32)
         o = fastmax_cuda.forwardpass(q,k,v,drop_noise,rpe_matrix,mask,dropout,normalize,temperature)
         ctx.save_for_backward(q,k,v,o)
         ctx.mask = mask
         ctx.b = b
-        ctx.t = temperatue
+        ctx.t = temperature
         o = o[:,:q.shape[1],:].permute(2,0,1).contiguous() # (n,d,b*h) -> (b*h,n,d)
         if b != 0: o = o.reshape((b,int(o.shape[0]/b),o.shape[1],o.shape[2])) # (b*h,n,d) -> (b,h,n,d)
         return o
@@ -332,28 +336,26 @@ class CausalSelfAttention(nn.Module):
                 raise TypeError("You need to call `gpt.set_kv_cache()`")
             k, v = self.kv_cache(input_pos, k, v)  
 
-        # attn_alg = "performer"
         attn_alg = self.config.attn_alg
-
-        if not isinstance(attn_alg, str):
-            if isinstance(attn_alg, tuple):
-                attn_alg = attn_alg[0]
-            else:
-                raise ValueError(f"Attention algorithm {attn_alg} has a type problem")
+        if isinstance(attn_alg, str):
+            pass
+        elif isinstance(attn_alg, tuple):
+            attn_alg = attn_alg[0]
+        else:
+            raise ValueError(f"Attention algorithm {attn_alg} has a type problem")
 
         if attn_alg == "quadratic":
             y = self.scaled_dot_product_attention(q, k, v, mask)
+        elif attn_alg == "performer":
+            y = self.performer_attention(q,k,v,input_pos)
+        elif attn_alg == "linearmax":
+            y = self.linearmax(q, k, v, input_pos)
+        elif attn_alg == "fastmax":
+            y = self.fastmax(q, k, v, input_pos)
+        elif attn_alg == "fastmax_cuda":
+            y = self.fastmax_cuda(q, k, v)    
         else:
-            if attn_alg == "performer":
-                y = self.performer_attention(q,k,v,input_pos)
-            elif attn_alg == "linearmax":
-                y = self.linearmax(q, k, v, input_pos)
-            elif attn_alg == "fastmax":
-                y = self.fastmax(q, k, v, input_pos)
-            elif attn_alg == "fastmax_cuda":
-                y = self.fastmax_cuda(q, k, v, input_pos)    
-            else:
-                raise ValueError(f"Attention algorithm {attn_alg} not supported")
+            raise ValueError(f"Attention algorithm {attn_alg} not supported")
 
 
         y = y.reshape(B, T, self.config.head_size * self.config.n_head)  # re-assemble all head outputs side by side
@@ -386,7 +388,7 @@ class CausalSelfAttention(nn.Module):
         o = o.cuda()
         return o
     
-    def fastmax_cuda(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
+    def fastmax_cuda(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
         # the inputs of fastmax are query, key, and value (q,k,v) in shape of  4-dimensional tensors (b, h, n, d); i.e. (batch, head, token length, dimension/channel per head)
         fastmax = FASTMultiHeadAttention()
 
@@ -396,8 +398,9 @@ class CausalSelfAttention(nn.Module):
         temperatue = 1.0
 
         # NOTE: If you're performing cross attention, using relative positional encoding (RPE) wont make sense. To have the RPE mastrix be zero, set the flags below as structured = False, is_zero = True
-        rpe_matrix = rpe_matrix_creator(k.shape[-2], q.shape[-1], q.device, q.dtype, structured=False, is_zero=True)
-        drop_noise = torch.normal(0,1,size=(q.shape),dtype=q.dtype,device=q.device)
+        # rpe_matrix = rpe_matrix_creator(k.shape[-2], q.shape[-1], q.device, q.dtype, structured=False, is_zero=True)
+        rpe_matrix = rpe_matrix_creator(k.shape[-2], q.shape[-1], q.device, torch.float32, structured=True, is_zero=False)
+        drop_noise = torch.normal(0,1,size=(q.shape), dtype=torch.float32, device=q.device)
         o = fastmax(q,k,v,drop_noise,rpe_matrix,mask,dropout,normalize,temperatue)
         return o
 

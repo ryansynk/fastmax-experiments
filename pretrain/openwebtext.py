@@ -67,7 +67,7 @@ def setup(
     logger = WandbLogger(name=f"Pretrain_{model_name}_{attn_alg}", entity='fast-attention', project='fastmax-experiments')
     fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=logger)
 
-    fabric.launch(main, devices, resume, Config.from_name(name=model_name), io, train, eval)
+    fabric.launch(main, devices, resume, Config.from_name(name=model_name, attn_alg=attn_alg), io, train, eval)
 
 
 def main(
