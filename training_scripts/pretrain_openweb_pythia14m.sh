@@ -13,8 +13,7 @@
 # Project setup
 
 # Project setup
-data_root="/fs/nexus-scratch/mhoover4/"
-proj_root="/vulcanscratch/mhoover4/code/fastmax-experiments/"
+proj_root="/fs/nexus-projects/FAST_Attention"
 
 # set up PyEnvironment
 source $(conda info --base)/etc/profile.d/conda.sh    # Use if conda is already on your path but you still need to run "conda init <shell_name>"       
@@ -25,4 +24,5 @@ wandb login
 python3 pretrain/openwebtext.py \
     --io.train_data_dir $data_root/data/openwebtext \
     --io.val_data_dir $data_root/data/openwebtext \
+    --io.out_dir $proj_root/pythia-14m_openwebtext/out \
     --model_name "pythia-14m"
