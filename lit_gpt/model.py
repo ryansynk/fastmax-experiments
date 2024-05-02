@@ -24,67 +24,101 @@ from contextlib import contextmanager
 from attention_mechanisms.fastmax import fastmax
 from attention_mechanisms.fastmax_hack import fastmax_hack
 
-import fastmax_cpu
+import fastmax_cuda
 
 class FASTMultiHeadAttention_Function(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q,k,v,mask,p,normalize,denum_Term):
-        if normalize == 1:
-            # q = q - torch.mean(q,dim = 3).unsqueeze(-1)
-            # k = k - torch.mean(k,dim = 3).unsqueeze(-1)
-            qn = torch.linalg.norm(q, dim = 3)
-            kn = torch.linalg.norm(k, dim = 3)
-            q = q/torch.linalg.norm(qn, dim = 2, ord = float('inf')).unsqueeze(-1).unsqueeze(-1)
-            k = k/torch.linalg.norm(kn, dim = 2, ord = float('inf')).unsqueeze(-1).unsqueeze(-1)
-            k = k/denum_Term
-        else:
-            k = k/(denum_Term*math.sqrt(q.shape[3]))
-        
-        orig_dtype = q.dtype
-        q = q.float()
-        k = k.float()
-        v = v.float()
-        o, denum= fastmax_cpu.forwardpass(q,k,v,mask,p)
-        o = o.to(orig_dtype)
-        denum = denum.to(orig_dtype)
-        
-        ctx.save_for_backward(q,k,v,o,denum)
+    def forward(ctx, q,k,v, drop_noise, rpe_matrix = None, mask = False, dropout = 0.0, normalize = False, temperature = 1.0):
+        b = 0
+        if len(q.shape) == 4:
+          b = q.shape[0]
+          q = q.reshape((q.shape[0]*q.shape[1],q.shape[2],q.shape[3])) # (b,h,n,d) -> (b*h,n,d)
+          k = k.reshape((k.shape[0]*k.shape[1],k.shape[2],k.shape[3])) # (b,h,n,d) -> (b*h,n,d)
+          v = v.reshape((v.shape[0]*v.shape[1],v.shape[2],v.shape[3])) # (b,h,n,d) -> (b*h,n,d)
+          drop_noise = drop_noise.reshape((drop_noise.shape[0]*drop_noise.shape[1],drop_noise.shape[2],drop_noise.shape[3])) # (b,h,n,d) -> (b*h,n,d)
+        elif len(q.shape) != 3: print("q, k, and v should be either 3 or 4 dimensional tensors. If 3D: (b*h,n,d), if 4D: (b,h,n,d).")
+
+        if rpe_matrix is None:
+          print("Relative Positional Encoding must be given. Send a 2*n-1 by d matrix of all zeros if you don't want to use RPE.")
+
+        q = q.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
+        k = k.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
+        v = v.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
+        drop_noise = drop_noise.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
+
+        breakpoint()
+        q = q.to(torch.float32)
+        k = k.to(torch.float32)
+        v = v.to(torch.float32)
+        o = fastmax_cuda.forwardpass(q,k,v,drop_noise,rpe_matrix,mask,dropout,normalize,temperature)
+        ctx.save_for_backward(q,k,v,o)
         ctx.mask = mask
-        ctx.p = p
+        ctx.b = b
+        ctx.t = temperature
+        o = o[:,:q.shape[1],:].permute(2,0,1).contiguous() # (n,d,b*h) -> (b*h,n,d)
+        if b != 0: o = o.reshape((b,int(o.shape[0]/b),o.shape[1],o.shape[2])) # (b*h,n,d) -> (b,h,n,d)
         return o
 
     @staticmethod
     def backward(ctx, grad_output):
-        q,k,v,o,denum = ctx.saved_tensors
+        q,k,v,o = ctx.saved_tensors
         mask = ctx.mask
-        p = ctx.p
+        b = ctx.b
+        t = ctx.t
 
-        orig_dtype = q.dtype
-        q = q.float()
-        k = k.float()
-        v = v.float()
-        o = o.float()
-        denum = denum.float()
-        grad_output = grad_output.float()
-        grads = fastmax_cpu.backwardpass(q,k,v,o,denum,grad_output,mask,p)
-        grads = [g.to(orig_dtype) for g in grads]
+        if(b != 0): grad_output = grad_output.reshape((grad_output.shape[0]*grad_output.shape[1],grad_output.shape[2],grad_output.shape[3])).contiguous()
+        grad_output = grad_output.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
+        gradq, gradk, gradv = fastmax_cuda.backwardpass(q,k,v,o,grad_output,mask)
 
-        return grads[0], grads[1], grads[2], None, None, None, None
+        gradq = gradq.permute(2,0,1).contiguous() # (n,d,b*h) -> (b*h,n,d)
+        gradk = gradk.permute(2,0,1).contiguous() # (n,d,b*h) -> (b*h,n,d)
+        gradv = gradv.permute(2,0,1).contiguous() # (n,d,b*h) -> (b*h,n,d)
+
+        if(b != 0):
+          gradq = gradq.reshape((b,int(gradq.shape[0]/b),gradq.shape[1],gradq.shape[2])).contiguous()
+          gradk = gradk.reshape((b,int(gradk.shape[0]/b),gradk.shape[1],gradk.shape[2])).contiguous()
+          gradv = gradv.reshape((b,int(gradv.shape[0]/b),gradv.shape[1],gradv.shape[2])).contiguous()
+        return gradq, gradk/t, gradv, None, None, None, None, None, None
 
 
 class FASTMultiHeadAttention(torch.nn.Module):
-    def __init__(self, mask = 1, p = 2, normalize = 1, denum_Term = 1):
+    def __init__(self):
         super(FASTMultiHeadAttention, self).__init__()
-        if mask is None or mask == 0: self.mask = 0
-        else: self.mask = 1
-        self.p = p
-        if normalize is None or normalize == 0: self.normalize = 0
-        else: self.normalize = 1
-        self.denum_Term = denum_Term
 
-    def forward(self, q,k,v):
-        # the inputs of fastmax are query, key, and value (q,k,v) in shape of  4-dimensional tensors (b, h, n, d); i.e. (batch, head, token length, dimension/channel per head)
-        return FASTMultiHeadAttention_Function.apply(q,k,v,self.mask,self.p,self.normalize,self.denum_Term)
+    def forward(self, q,k,v,drop_noise,rpe_matrix = None, mask = False, dropout = 0.0, normalize = False, temperatue = 1.0):
+        return FASTMultiHeadAttention_Function.apply(q,k,v,drop_noise,rpe_matrix,mask,dropout,normalize,temperatue)
+    
+
+def rpe_matrix_creator(n, d, device, dtype, structured = True, is_zero = False):
+    """
+    Creates the relative positional encoding matrix
+    Inputs: (assuming query is a (b,h,n,d) or (b*h,n,d) tensor)
+      - n (int): number of tokens
+      - d (int): dimesion/channel per head
+      - data type: must be torch.float32. This input is used to make sure the datatype used by the attention head is torch.float32.
+      - Structured (bool): if True, produces sin/cos based RPE, and randomized matrx otherwise.
+    Output:
+      - rpe: a (2*n-1,d) matrix.
+    """
+    if(dtype != torch.float32): print("The data type must be float32 in order for Fastmax to work")
+    if(structured):
+        pe_positive = torch.zeros(n, d,device=device,dtype=dtype)
+        pe_negative = torch.zeros(n, d,device=device,dtype=dtype)
+        position = torch.arange(0, n, device=device,dtype=dtype).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d, 2, device=device,dtype=dtype) * -(math.log(10000.0) / d))
+        pe_positive[:, 0::2] = torch.sin(position * div_term)
+        pe_positive[:, 1::2] = torch.cos(position * div_term)
+        pe_negative[:, 0::2] = torch.sin(-1 * position * div_term)
+        pe_negative[:, 1::2] = torch.cos(-1 * position * div_term)
+        pe_positive = torch.flip(pe_positive, [0])
+        pe_negative = pe_negative[1:]
+        rpe = torch.cat([pe_positive, pe_negative], dim=0)
+    else: 
+        if is_zero:
+            rpe = torch.zeros(0,1,size=(2*n-1,d),device=device,dtype=dtype)
+        else:
+            rpe = torch.normal(0,1,size=(2*n-1,d),device=device,dtype=dtype)
+    return rpe
 
 
 @contextmanager
@@ -302,30 +336,26 @@ class CausalSelfAttention(nn.Module):
                 raise TypeError("You need to call `gpt.set_kv_cache()`")
             k, v = self.kv_cache(input_pos, k, v)  
 
-        # attn_alg = "performer"
         attn_alg = self.config.attn_alg
-
-        if not isinstance(attn_alg, str):
-            if isinstance(attn_alg, tuple):
-                attn_alg = attn_alg[0]
-            else:
-                raise ValueError(f"Attention algorithm {attn_alg} has a type problem")
+        if isinstance(attn_alg, str):
+            pass
+        elif isinstance(attn_alg, tuple):
+            attn_alg = attn_alg[0]
+        else:
+            raise ValueError(f"Attention algorithm {attn_alg} has a type problem")
 
         if attn_alg == "quadratic":
             y = self.scaled_dot_product_attention(q, k, v, mask)
+        elif attn_alg == "performer":
+            y = self.performer_attention(q,k,v,input_pos)
+        elif attn_alg == "linearmax":
+            y = self.linearmax(q, k, v, input_pos)
+        elif attn_alg == "fastmax":
+            y = self.fastmax(q, k, v, input_pos)
+        elif attn_alg == "fastmax_cuda":
+            y = self.fastmax_cuda(q, k, v)    
         else:
-            if attn_alg == "performer":
-                y = self.performer_attention(q,k,v,input_pos)
-            elif attn_alg == "linearmax":
-                y = self.linearmax(q, k, v, input_pos)
-            elif attn_alg == "fastmax":
-                y = self.fastmax(q, k, v, input_pos)    
-            elif attn_alg == "linearmax_cpp":
-                y = self.linearmax_cpp(q, k, v, input_pos)
-            elif attn_alg == "fastmax_cpp":
-                y = self.fastmax_cpp(q, k, v, input_pos)
-            else:
-                raise ValueError(f"Attention algorithm {attn_alg} not supported")
+            raise ValueError(f"Attention algorithm {attn_alg} not supported")
 
 
         y = y.reshape(B, T, self.config.head_size * self.config.n_head)  # re-assemble all head outputs side by side
@@ -358,30 +388,20 @@ class CausalSelfAttention(nn.Module):
         o = o.cuda()
         return o
     
-    def linearmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
+    def fastmax_cuda(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        # the inputs of fastmax are query, key, and value (q,k,v) in shape of  4-dimensional tensors (b, h, n, d); i.e. (batch, head, token length, dimension/channel per head)
+        fastmax = FASTMultiHeadAttention()
+
         mask = True
-        if input_pos is not None:
-            # We are using KVCache, so we are at inference time and don't need the mask
-            mask = False
-        q = q.cpu()
-        k = k.cpu()
-        v = v.cpu()
-        linearmax_cpp = FASTMultiHeadAttention(p=1, mask=mask)
-        o = linearmax_cpp(q,k,v)
-        o = o.cuda()
-        return o
-    
-    def fastmax_cpp(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
-        mask = True
-        if input_pos is not None:
-            # We are using KVCache, so we are at inference time and don't need the mask
-            mask = False
-        q = q.cpu()
-        k = k.cpu()
-        v = v.cpu()
-        fastmax_cpp = FASTMultiHeadAttention(mask=mask)
-        o = fastmax_cpp(q, k, v)
-        o = o.cuda()
+        dropout = 0.0 # between 0 and 1
+        normalize = True
+        temperatue = 1.0
+
+        # NOTE: If you're performing cross attention, using relative positional encoding (RPE) wont make sense. To have the RPE mastrix be zero, set the flags below as structured = False, is_zero = True
+        # rpe_matrix = rpe_matrix_creator(k.shape[-2], q.shape[-1], q.device, q.dtype, structured=False, is_zero=True)
+        rpe_matrix = rpe_matrix_creator(k.shape[-2], q.shape[-1], q.device, torch.float32, structured=True, is_zero=False)
+        drop_noise = torch.normal(0,1,size=(q.shape), dtype=torch.float32, device=q.device)
+        o = fastmax(q,k,v,drop_noise,rpe_matrix,mask,dropout,normalize,temperatue)
         return o
 
     def performer_attention(

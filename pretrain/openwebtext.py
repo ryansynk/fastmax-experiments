@@ -47,6 +47,7 @@ def setup(
         min_lr=6e-5,
     ),
     eval: EvalArgs = EvalArgs(interval=1000, max_iters=100),
+    attn_alg: Optional[str] = "quadratic",
 ) -> None:
     print(locals())
     precision = precision or get_default_supported_precision(training=True)
@@ -63,10 +64,10 @@ def setup(
         strategy = "auto"
 
     # logger = CSVLogger(io.out_dir.parent, io.out_dir.name, flush_logs_every_n_steps=train.log_interval)
-    logger = WandbLogger(name=f"Pretrain_{model_name}", entity='fast-attention', project='fastmax-experiments')
+    logger = WandbLogger(name=f"Pretrain_{model_name}_{attn_alg}", entity='fast-attention', project='fastmax-experiments')
     fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=logger)
 
-    fabric.launch(main, devices, resume, Config.from_name(name=model_name), io, train, eval)
+    fabric.launch(main, devices, resume, Config.from_name(name=model_name, attn_alg=attn_alg), io, train, eval)
 
 
 def main(

@@ -25,11 +25,12 @@
 ```
 conda create -n cmsc720 python=3.10
 conda activate cmsc720
-module load gcc
 pip install -r requirements-all.txt
-python setup_fast.py install
+module load gcc
+module load cuda
+srun --gres=gpu:1 python setup_fast_cuda.py install
 ```
-(That last line for building the fastmax binaries takes about 30 minutes.)
+Note on the last line that we require an actual GPU available for running setup_fast_cuda.py, in addition to a cpu with `nvcc` (which we get from `module load cuda`).
 
 # ⚡ Lit-GPT
 
