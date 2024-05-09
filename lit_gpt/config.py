@@ -61,7 +61,7 @@ class Config:
     rope_base: int = 10000
     n_expert: int = 0
     n_expert_per_token: int = 0
-    attn_alg: Optional[str] = "quadratic",
+    attn_alg: Optional[str] = "quadratic"
 
     def __post_init__(self):
         if not self.name:
@@ -1444,5 +1444,33 @@ llama_2_function_calling = [
 ]
 
 configs.extend(llama_2_function_calling)
+
+########################
+# Ryan's Random easy transformer
+########################
+easy_transformer = dict(
+    name="easy-transformer",
+    scale_embeddings = True,
+    block_size = 512,
+    vocab_size = 205,
+    n_layer = 16,
+    n_head = 8,
+    n_embd = 512,
+)
+
+configs.append(easy_transformer)
+
+easy_transformer_fastmax = dict(
+    name="easy-transformer-fastmax",
+    scale_embeddings = True,
+    block_size = 512,
+    vocab_size = 205,
+    n_layer = 16,
+    n_head = 8,
+    n_embd = 512,
+    attn_alg = "fastmax_cuda"
+)
+
+configs.append(easy_transformer_fastmax)
 
 name_to_config = {config["name"]: config for config in configs}

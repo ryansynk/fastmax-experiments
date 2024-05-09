@@ -26,70 +26,134 @@ from attention_mechanisms.fastmax_hack import fastmax_hack
 
 import fastmax_cuda
 
+
 class FASTMultiHeadAttention_Function(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q,k,v, drop_noise, rpe_matrix = None, mask = False, dropout = 0.0, normalize = False, temperature = 1.0):
+    def forward(
+        ctx,
+        q,
+        k,
+        v,
+        drop_noise,
+        rpe_matrix=None,
+        mask=False,
+        dropout=0.0,
+        normalize=False,
+        temperature=1.0,
+    ):
         b = 0
         if len(q.shape) == 4:
-          b = q.shape[0]
-          q = q.reshape((q.shape[0]*q.shape[1],q.shape[2],q.shape[3])) # (b,h,n,d) -> (b*h,n,d)
-          k = k.reshape((k.shape[0]*k.shape[1],k.shape[2],k.shape[3])) # (b,h,n,d) -> (b*h,n,d)
-          v = v.reshape((v.shape[0]*v.shape[1],v.shape[2],v.shape[3])) # (b,h,n,d) -> (b*h,n,d)
-          drop_noise = drop_noise.reshape((drop_noise.shape[0]*drop_noise.shape[1],drop_noise.shape[2],drop_noise.shape[3])) # (b,h,n,d) -> (b*h,n,d)
-        elif len(q.shape) != 3: print("q, k, and v should be either 3 or 4 dimensional tensors. If 3D: (b*h,n,d), if 4D: (b,h,n,d).")
+            b = q.shape[0]
+            q = q.reshape(
+                (q.shape[0] * q.shape[1], q.shape[2], q.shape[3])
+            )  # (b,h,n,d) -> (b*h,n,d)
+            k = k.reshape(
+                (k.shape[0] * k.shape[1], k.shape[2], k.shape[3])
+            )  # (b,h,n,d) -> (b*h,n,d)
+            v = v.reshape(
+                (v.shape[0] * v.shape[1], v.shape[2], v.shape[3])
+            )  # (b,h,n,d) -> (b*h,n,d)
+            drop_noise = drop_noise.reshape(
+                (
+                    drop_noise.shape[0] * drop_noise.shape[1],
+                    drop_noise.shape[2],
+                    drop_noise.shape[3],
+                )
+            )  # (b,h,n,d) -> (b*h,n,d)
+        elif len(q.shape) != 3:
+            print(
+                "q, k, and v should be either 3 or 4 dimensional tensors. If 3D: (b*h,n,d), if 4D: (b,h,n,d)."
+            )
 
         if rpe_matrix is None:
-          print("Relative Positional Encoding must be given. Send a 2*n-1 by d matrix of all zeros if you don't want to use RPE.")
+            print(
+                "Relative Positional Encoding must be given. Send a 2*n-1 by d matrix of all zeros if you don't want to use RPE."
+            )
 
-        q = q.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
-        k = k.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
-        v = v.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
-        drop_noise = drop_noise.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
+        q = q.permute(1, 2, 0).contiguous()  # (b*h,n,d) -> (n,d,b*h)
+        k = k.permute(1, 2, 0).contiguous()  # (b*h,n,d) -> (n,d,b*h)
+        v = v.permute(1, 2, 0).contiguous()  # (b*h,n,d) -> (n,d,b*h)
+        drop_noise = drop_noise.permute(1, 2, 0).contiguous()  # (b*h,n,d) -> (n,d,b*h)
 
         breakpoint()
         q = q.to(torch.float32)
         k = k.to(torch.float32)
         v = v.to(torch.float32)
-        o = fastmax_cuda.forwardpass(q,k,v,drop_noise,rpe_matrix,mask,dropout,normalize,temperature)
-        ctx.save_for_backward(q,k,v,o)
+        o = fastmax_cuda.forwardpass(
+            q, k, v, drop_noise, rpe_matrix, mask, dropout, normalize, temperature
+        )
+        ctx.save_for_backward(q, k, v, o)
         ctx.mask = mask
         ctx.b = b
         ctx.t = temperature
-        o = o[:,:q.shape[1],:].permute(2,0,1).contiguous() # (n,d,b*h) -> (b*h,n,d)
-        if b != 0: o = o.reshape((b,int(o.shape[0]/b),o.shape[1],o.shape[2])) # (b*h,n,d) -> (b,h,n,d)
+        o = (
+            o[:, : q.shape[1], :].permute(2, 0, 1).contiguous()
+        )  # (n,d,b*h) -> (b*h,n,d)
+        if b != 0:
+            o = o.reshape(
+                (b, int(o.shape[0] / b), o.shape[1], o.shape[2])
+            )  # (b*h,n,d) -> (b,h,n,d)
         return o
 
     @staticmethod
     def backward(ctx, grad_output):
-        q,k,v,o = ctx.saved_tensors
+        q, k, v, o = ctx.saved_tensors
         mask = ctx.mask
         b = ctx.b
         t = ctx.t
 
-        if(b != 0): grad_output = grad_output.reshape((grad_output.shape[0]*grad_output.shape[1],grad_output.shape[2],grad_output.shape[3])).contiguous()
-        grad_output = grad_output.permute(1,2,0).contiguous() # (b*h,n,d) -> (n,d,b*h)
-        gradq, gradk, gradv = fastmax_cuda.backwardpass(q,k,v,o,grad_output,mask)
+        if b != 0:
+            grad_output = grad_output.reshape(
+                (
+                    grad_output.shape[0] * grad_output.shape[1],
+                    grad_output.shape[2],
+                    grad_output.shape[3],
+                )
+            ).contiguous()
+        grad_output = grad_output.permute(
+            1, 2, 0
+        ).contiguous()  # (b*h,n,d) -> (n,d,b*h)
+        gradq, gradk, gradv = fastmax_cuda.backwardpass(q, k, v, o, grad_output, mask)
 
-        gradq = gradq.permute(2,0,1).contiguous() # (n,d,b*h) -> (b*h,n,d)
-        gradk = gradk.permute(2,0,1).contiguous() # (n,d,b*h) -> (b*h,n,d)
-        gradv = gradv.permute(2,0,1).contiguous() # (n,d,b*h) -> (b*h,n,d)
+        gradq = gradq.permute(2, 0, 1).contiguous()  # (n,d,b*h) -> (b*h,n,d)
+        gradk = gradk.permute(2, 0, 1).contiguous()  # (n,d,b*h) -> (b*h,n,d)
+        gradv = gradv.permute(2, 0, 1).contiguous()  # (n,d,b*h) -> (b*h,n,d)
 
-        if(b != 0):
-          gradq = gradq.reshape((b,int(gradq.shape[0]/b),gradq.shape[1],gradq.shape[2])).contiguous()
-          gradk = gradk.reshape((b,int(gradk.shape[0]/b),gradk.shape[1],gradk.shape[2])).contiguous()
-          gradv = gradv.reshape((b,int(gradv.shape[0]/b),gradv.shape[1],gradv.shape[2])).contiguous()
-        return gradq, gradk/t, gradv, None, None, None, None, None, None
+        if b != 0:
+            gradq = gradq.reshape(
+                (b, int(gradq.shape[0] / b), gradq.shape[1], gradq.shape[2])
+            ).contiguous()
+            gradk = gradk.reshape(
+                (b, int(gradk.shape[0] / b), gradk.shape[1], gradk.shape[2])
+            ).contiguous()
+            gradv = gradv.reshape(
+                (b, int(gradv.shape[0] / b), gradv.shape[1], gradv.shape[2])
+            ).contiguous()
+        return gradq, gradk / t, gradv, None, None, None, None, None, None
 
 
 class FASTMultiHeadAttention(torch.nn.Module):
     def __init__(self):
         super(FASTMultiHeadAttention, self).__init__()
 
-    def forward(self, q,k,v,drop_noise,rpe_matrix = None, mask = False, dropout = 0.0, normalize = False, temperatue = 1.0):
-        return FASTMultiHeadAttention_Function.apply(q,k,v,drop_noise,rpe_matrix,mask,dropout,normalize,temperatue)
-    
+    def forward(
+        self,
+        q,
+        k,
+        v,
+        drop_noise,
+        rpe_matrix=None,
+        mask=False,
+        dropout=0.0,
+        normalize=False,
+        temperatue=1.0,
+    ):
+        return FASTMultiHeadAttention_Function.apply(
+            q, k, v, drop_noise, rpe_matrix, mask, dropout, normalize, temperatue
+        )
 
-def rpe_matrix_creator(n, d, device, dtype, structured = True, is_zero = False):
+
+def rpe_matrix_creator(n, d, device, dtype, structured=True, is_zero=False):
     """
     Creates the relative positional encoding matrix
     Inputs: (assuming query is a (b,h,n,d) or (b*h,n,d) tensor)
@@ -100,12 +164,15 @@ def rpe_matrix_creator(n, d, device, dtype, structured = True, is_zero = False):
     Output:
       - rpe: a (2*n-1,d) matrix.
     """
-    if(dtype != torch.float32): print("The data type must be float32 in order for Fastmax to work")
-    if(structured):
-        pe_positive = torch.zeros(n, d,device=device,dtype=dtype)
-        pe_negative = torch.zeros(n, d,device=device,dtype=dtype)
-        position = torch.arange(0, n, device=device,dtype=dtype).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d, 2, device=device,dtype=dtype) * -(math.log(10000.0) / d))
+    if dtype != torch.float32:
+        print("The data type must be float32 in order for Fastmax to work")
+    if structured:
+        pe_positive = torch.zeros(n, d, device=device, dtype=dtype)
+        pe_negative = torch.zeros(n, d, device=device, dtype=dtype)
+        position = torch.arange(0, n, device=device, dtype=dtype).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d, 2, device=device, dtype=dtype) * -(math.log(10000.0) / d)
+        )
         pe_positive[:, 0::2] = torch.sin(position * div_term)
         pe_positive[:, 1::2] = torch.cos(position * div_term)
         pe_negative[:, 0::2] = torch.sin(-1 * position * div_term)
@@ -113,11 +180,11 @@ def rpe_matrix_creator(n, d, device, dtype, structured = True, is_zero = False):
         pe_positive = torch.flip(pe_positive, [0])
         pe_negative = pe_negative[1:]
         rpe = torch.cat([pe_positive, pe_negative], dim=0)
-    else: 
+    else:
         if is_zero:
-            rpe = torch.zeros(0,1,size=(2*n-1,d),device=device,dtype=dtype)
+            rpe = torch.zeros(0, 1, size=(2 * n - 1, d), device=device, dtype=dtype)
         else:
-            rpe = torch.normal(0,1,size=(2*n-1,d),device=device,dtype=dtype)
+            rpe = torch.normal(0, 1, size=(2 * n - 1, d), device=device, dtype=dtype)
     return rpe
 
 
@@ -132,7 +199,9 @@ class GPT(nn.Module):
         assert config.padded_vocab_size is not None
         self.config = config
 
-        self.lm_head = nn.Linear(config.n_embd, config.padded_vocab_size, bias=config.lm_head_bias)
+        self.lm_head = nn.Linear(
+            config.n_embd, config.padded_vocab_size, bias=config.lm_head_bias
+        )
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.padded_vocab_size, config.n_embd),
@@ -154,7 +223,9 @@ class GPT(nn.Module):
         This allows setting a smaller number to avoid allocating unused memory
         """
         if value > self.config.block_size:
-            raise ValueError(f"Cannot attend to {value}, block size is only {self.config.block_size}")
+            raise ValueError(
+                f"Cannot attend to {value}, block size is only {self.config.block_size}"
+            )
         self._max_seq_length = value
         if not hasattr(self, "cos"):
             # first call
@@ -180,10 +251,14 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx: torch.Tensor, input_pos: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self, idx: torch.Tensor, input_pos: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         T = idx.size(1)
         if self.max_seq_length < T:
-            raise ValueError(f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}.")
+            raise ValueError(
+                f"Cannot forward sequence of length {T}, max seq length is only {self.max_seq_length}."
+            )
 
         if input_pos is not None:  # use the kv cache
             cos = self.cos.index_select(0, input_pos)
@@ -209,7 +284,9 @@ class GPT(nn.Module):
     def from_name(cls, name: str, **kwargs: Any) -> Self:
         return cls(Config.from_name(name, **kwargs))
 
-    def rope_cache(self, device: Optional[torch.device] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def rope_cache(
+        self, device: Optional[torch.device] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         return build_rope_cache(
             seq_len=self.max_seq_length,
             n_elem=self.config.rope_n_elem,
@@ -251,7 +328,11 @@ class Block(nn.Module):
         super().__init__()
         self.norm_1 = config.norm_class(config.n_embd, eps=config.norm_eps)
         self.attn = CausalSelfAttention(config)
-        self.norm_2 = None if config.shared_attention_norm else config.norm_class(config.n_embd, eps=config.norm_eps)
+        self.norm_2 = (
+            None
+            if config.shared_attention_norm
+            else config.norm_class(config.n_embd, eps=config.norm_eps)
+        )
         self.mlp = config.mlp_class(config)
 
         self.config = config
@@ -288,7 +369,9 @@ class CausalSelfAttention(nn.Module):
         self.attn = nn.Linear(config.n_embd, shape, bias=config.bias)
         # output projection
         # if `head_size` is explicitly specified in the config, `n_emd` might not be equal to `head_size * n_head`
-        self.proj = nn.Linear(config.head_size * config.n_head, config.n_embd, bias=config.bias)
+        self.proj = nn.Linear(
+            config.head_size * config.n_head, config.n_embd, bias=config.bias
+        )
         # disabled by default
         self.kv_cache: Optional[KVCache] = None
 
@@ -302,14 +385,18 @@ class CausalSelfAttention(nn.Module):
         mask: Optional[torch.Tensor] = None,
         input_pos: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
+        B, T, C = (
+            x.size()
+        )  # batch size, sequence length, embedding dimensionality (n_embd)
 
         qkv = self.attn(x)
 
         # assemble into a number of query groups to support MHA, MQA and GQA together (see `config.n_query_groups`)
         q_per_kv = self.config.n_head // self.config.n_query_groups
         total_qkv = q_per_kv + 2  # each group has 1+ queries, 1 key, and 1 value
-        qkv = qkv.view(B, T, self.config.n_query_groups, total_qkv, self.config.head_size)
+        qkv = qkv.view(
+            B, T, self.config.n_query_groups, total_qkv, self.config.head_size
+        )
         qkv = qkv.permute(0, 2, 3, 1, 4)  # (B, n_query_groups, total_qkv, T, hs)
 
         # split batched computation into three
@@ -318,9 +405,15 @@ class CausalSelfAttention(nn.Module):
         # maybe repeat k and v if for the non multi-head attention cases
         # training: flash attention requires it
         # inference: multi-query would require a full kv cache so avoid it to limit its memory usage
-        if self.config.n_query_groups != self.config.n_head and (input_pos is None or self.config.n_query_groups != 1):
-            k = k.expand(B, self.config.n_query_groups, q_per_kv, T, self.config.head_size)
-            v = v.expand(B, self.config.n_query_groups, q_per_kv, T, self.config.head_size)
+        if self.config.n_query_groups != self.config.n_head and (
+            input_pos is None or self.config.n_query_groups != 1
+        ):
+            k = k.expand(
+                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
+            )
+            v = v.expand(
+                B, self.config.n_query_groups, q_per_kv, T, self.config.head_size
+            )
 
         q = q.reshape(B, -1, T, self.config.head_size)  # (B, nh_q, T, hs)
         k = k.reshape(B, -1, T, self.config.head_size)  # (B, nh_k, T, hs)
@@ -334,7 +427,7 @@ class CausalSelfAttention(nn.Module):
         if input_pos is not None:
             if not isinstance(self.kv_cache, KVCache):
                 raise TypeError("You need to call `gpt.set_kv_cache()`")
-            k, v = self.kv_cache(input_pos, k, v)  
+            k, v = self.kv_cache(input_pos, k, v)
 
         attn_alg = self.config.attn_alg
         if isinstance(attn_alg, str):
@@ -347,23 +440,26 @@ class CausalSelfAttention(nn.Module):
         if attn_alg == "quadratic":
             y = self.scaled_dot_product_attention(q, k, v, mask)
         elif attn_alg == "performer":
-            y = self.performer_attention(q,k,v,input_pos)
+            y = self.performer_attention(q, k, v, input_pos)
         elif attn_alg == "linearmax":
             y = self.linearmax(q, k, v, input_pos)
         elif attn_alg == "fastmax":
             y = self.fastmax(q, k, v, input_pos)
         elif attn_alg == "fastmax_cuda":
-            y = self.fastmax_cuda(q, k, v)    
+            y = self.fastmax_cuda(q, k, v)
         else:
             raise ValueError(f"Attention algorithm {attn_alg} not supported")
 
-
-        y = y.reshape(B, T, self.config.head_size * self.config.n_head)  # re-assemble all head outputs side by side
+        y = y.reshape(
+            B, T, self.config.head_size * self.config.n_head
+        )  # re-assemble all head outputs side by side
 
         # output projection
         return self.proj(y)
 
-    def linearmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
+    def linearmax(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor
+    ) -> torch.Tensor:
         mask = True
         if input_pos is not None:
             # We are using KVCache, so we are at inference time and don't need the mask
@@ -375,8 +471,10 @@ class CausalSelfAttention(nn.Module):
         # o = o.cuda()
         o = fastmax_hack(q, k, v, p=1, mask=mask)
         return o
-    
-    def fastmax(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor) -> torch.Tensor:
+
+    def fastmax(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, input_pos: torch.Tensor
+    ) -> torch.Tensor:
         mask = True
         if input_pos is not None:
             # We are using KVCache, so we are at inference time and don't need the mask
@@ -387,41 +485,77 @@ class CausalSelfAttention(nn.Module):
         o = fastmax(q, k, v, p=2, mask=mask)
         o = o.cuda()
         return o
-    
-    def fastmax_cuda(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+
+    def fastmax_cuda(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    ) -> torch.Tensor:
         # the inputs of fastmax are query, key, and value (q,k,v) in shape of  4-dimensional tensors (b, h, n, d); i.e. (batch, head, token length, dimension/channel per head)
         fastmax = FASTMultiHeadAttention()
 
         mask = True
-        dropout = 0.0 # between 0 and 1
+        dropout = 0.0  # between 0 and 1
         normalize = True
         temperatue = 1.0
+        a0 = 1.0
+        a1 = 1.0
+        a2 = 0.5
+        lim = 1.0
 
         # NOTE: If you're performing cross attention, using relative positional encoding (RPE) wont make sense. To have the RPE mastrix be zero, set the flags below as structured = False, is_zero = True
         # rpe_matrix = rpe_matrix_creator(k.shape[-2], q.shape[-1], q.device, q.dtype, structured=False, is_zero=True)
-        rpe_matrix = rpe_matrix_creator(k.shape[-2], q.shape[-1], q.device, torch.float32, structured=True, is_zero=False)
-        drop_noise = torch.normal(0,1,size=(q.shape), dtype=torch.float32, device=q.device)
-        o = fastmax(q,k,v,drop_noise,rpe_matrix,mask,dropout,normalize,temperatue)
+        rpe_matrix = rpe_matrix_creator(
+            k.shape[-2],
+            q.shape[-1],
+            q.device,
+            torch.float32,
+            structured=True,
+            is_zero=False,
+        )
+        drop_noise = torch.normal(
+            0, 1, size=(q.shape), dtype=torch.float32, device=q.device
+        )
+        o = fastmax(
+            q,
+            k,
+            v,
+            drop_noise,
+            rpe_matrix,
+            mask,
+            dropout,
+            normalize,
+            temperatue,
+            a0,
+            a1,
+            a2,
+            lim,
+        )
         return o
 
     def performer_attention(
-            self, q: torch.Tensor, k: torch.Tensor, v:torch.Tensor, input_pos: Optional[torch.Tensor] = None, eps=1e-6
-            ) -> torch.Tensor:
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        input_pos: Optional[torch.Tensor] = None,
+        eps=1e-6,
+    ) -> torch.Tensor:
         autocast_enabled = torch.is_autocast_enabled()
         # is_half = isinstance(q, torch.cuda.HalfTensor)
         # if is_half: assert APEX_AVAILABLE, 'half tensors can only be used if nvidia apex is available'
-        cuda_context = null_context if not autocast_enabled else partial(autocast, enabled=False)
+        cuda_context = (
+            null_context if not autocast_enabled else partial(autocast, enabled=False)
+        )
 
-        #print(autocast_enabled)
-        k = k[:,:,:q.size(dim=2), :]
-        v = v[:,:,:q.size(dim=2), :]
+        # print(autocast_enabled)
+        k = k[:, :, : q.size(dim=2), :]
+        v = v[:, :, : q.size(dim=2), :]
 
-        k_cumsum = k.cumsum(dim=-2) + eps 
-        D_inv = 1. / torch.einsum('...nd,...nd->...n', q, k_cumsum.type_as(q))
+        k_cumsum = k.cumsum(dim=-2) + eps
+        D_inv = 1.0 / torch.einsum("...nd,...nd->...n", q, k_cumsum.type_as(q))
         Q = q.float()
         K = k.float()
         V = v.float()
-        causal_dot_product_fn = CausalDotProduct.apply        
+        causal_dot_product_fn = CausalDotProduct.apply
         # q, k, v = map(lambda t: t.float(), (q, k, v))
         # with torch.autocast('cuda', torch.bfloat16, enabled=True):
         #     print(q.dtype, k.dtype, v.dtype)
@@ -429,18 +563,22 @@ class CausalSelfAttention(nn.Module):
         #     out = causal_dot_product_fn(q + eps, k + eps, v + eps)
         out = causal_dot_product_fn(Q, K, V)
         out = out.to(torch.float16)
-        out = torch.einsum('...nd,...n->...nd', out, D_inv)
+        out = torch.einsum("...nd,...n->...nd", out, D_inv)
         return out
 
     def scaled_dot_product_attention(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask: Optional[torch.Tensor] = None
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         scale = 1.0 / math.sqrt(self.config.head_size)
         y = torch.nn.functional.scaled_dot_product_attention(
             q, k, v, attn_mask=mask, dropout_p=0.0, scale=scale, is_causal=mask is None
         )
         return y.transpose(1, 2)
-        
+
     def build_kv_cache(
         self,
         batch_size: int,
@@ -453,7 +591,9 @@ class CausalSelfAttention(nn.Module):
         v_shape = (batch_size, heads, max_seq_length, self.config.head_size)
         if rope_cache_length is None:
             if self.config.rotary_percentage != 1.0:
-                raise TypeError("Please pass the `rope_cache_length=gpt.cos.size(-1)` value")
+                raise TypeError(
+                    "Please pass the `rope_cache_length=gpt.cos.size(-1)` value"
+                )
             k_shape = v_shape
         else:
             k_shape = (
@@ -514,12 +654,18 @@ class LLaMAMoE(nn.Module):
         Derived from: https://github.com/mistralai/mistral-src/blob/b46d6/moe_one_file_ref.py#L203-L219
         See also figure 1 in https://arxiv.org/abs/2211.15841
         """
-        B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
+        B, T, C = (
+            x.size()
+        )  # batch size, sequence length, embedding dimensionality (n_embd)
         x = x.view(-1, C)  # (B*T, C)
         router = self.gate(x)  # (B*T, n_expert)
-        probs, indices = torch.topk(router, self.config.n_expert_per_token)  # (B*T, n_expert_per_token)
+        probs, indices = torch.topk(
+            router, self.config.n_expert_per_token
+        )  # (B*T, n_expert_per_token)
         probs = probs.softmax(dim=1, dtype=torch.float).to(dtype=x.dtype)
-        masks = indices.unsqueeze(-1) == torch.arange(self.config.n_expert, device=x.device)
+        masks = indices.unsqueeze(-1) == torch.arange(
+            self.config.n_expert, device=x.device
+        )
         masks = masks.permute(2, 0, 1)  # (n_expert, B*T, n_expert_per_token)
         y = torch.zeros_like(x)  # (B*T, C)
         for mask, expert in zip(masks, self.experts):
@@ -529,7 +675,11 @@ class LLaMAMoE(nn.Module):
 
 
 def build_rope_cache(
-    seq_len: int, n_elem: int, device: Optional[torch.device] = None, base: int = 10000, condense_ratio: int = 1
+    seq_len: int,
+    n_elem: int,
+    device: Optional[torch.device] = None,
+    base: int = 10000,
+    condense_ratio: int = 1,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Enhanced Transformer with Rotary Position Embedding.
 
@@ -567,10 +717,16 @@ class KVCache(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ) -> None:
         super().__init__()
-        self.register_buffer("k", torch.zeros(k_shape, device=device, dtype=dtype), persistent=False)
-        self.register_buffer("v", torch.zeros(v_shape, device=device, dtype=dtype), persistent=False)
+        self.register_buffer(
+            "k", torch.zeros(k_shape, device=device, dtype=dtype), persistent=False
+        )
+        self.register_buffer(
+            "v", torch.zeros(v_shape, device=device, dtype=dtype), persistent=False
+        )
 
-    def forward(self, input_pos: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, input_pos: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         # move the buffer to the activation dtype for when AMP is used
         self.k = self.k.to(k.dtype)
         self.v = self.v.to(v.dtype)
@@ -584,6 +740,8 @@ class KVCache(nn.Module):
         torch.nn.init.zeros_(self.v)
 
 
-def build_mask_cache(max_seq_length: int, device: Optional[torch.device] = None) -> torch.Tensor:
+def build_mask_cache(
+    max_seq_length: int, device: Optional[torch.device] = None
+) -> torch.Tensor:
     ones = torch.ones((max_seq_length, max_seq_length), device=device, dtype=torch.bool)
     return torch.tril(ones).unsqueeze(0).unsqueeze(0)

@@ -5,6 +5,7 @@ import sys
 import time
 import logging
 import socket
+import gzip
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, Union
@@ -17,7 +18,7 @@ from lightning.fabric.loggers import CSVLogger
 from lightning.pytorch.loggers import WandbLogger
 from lightning.fabric.strategies import FSDPStrategy
 from lightning.fabric.utilities import ThroughputMonitor, measure_flops
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, IterableDataset, Dataset
 
 # support running without installing as a package
 wd = Path(__file__).parent.parent.resolve()
@@ -27,6 +28,16 @@ from lit_gpt import Config
 from lit_gpt.args import EvalArgs, IOArgs, TrainArgs
 from lit_gpt.model import GPT, Block
 from lit_gpt.utils import CLI, chunked_cross_entropy, estimate_flops, get_default_supported_precision, num_parameters
+
+
+def decode_token(token):
+    return str(chr(max(32, token)))
+
+def decode_tokens(tokens):
+    return ''.join(list(map(decode_token, tokens)))
+
+
+
 
 def setup(
     model_name: str = "pythia-70m",
@@ -50,7 +61,6 @@ def setup(
         min_lr=6e-5,
     ),
     eval: EvalArgs = EvalArgs(interval=1000, max_iters=100),
-    attn_alg: Optional[str] = "quadratic",
 ) -> None:
     print(locals())
     precision = precision or get_default_supported_precision(training=True)
@@ -67,10 +77,10 @@ def setup(
         strategy = "auto"
 
     # logger = CSVLogger(io.out_dir.parent, io.out_dir.name, flush_logs_every_n_steps=train.log_interval)
-    logger = WandbLogger(name=f"Pretrain_{model_name}_{attn_alg}", entity='fast-attention', project='fastmax-experiments')
+    logger = WandbLogger(name=f"Pretrain_{model_name}", entity='fast-attention', project='fastmax-experiments')
     fabric = L.Fabric(devices=devices, strategy=strategy, precision=precision, loggers=logger)
 
-    fabric.launch(main, devices, resume, Config.from_name(name=model_name, attn_alg=attn_alg), io, train, eval)
+    fabric.launch(main, devices, resume, Config.from_name(name=model_name), io, train, eval)
 
 
 def main(
@@ -109,9 +119,11 @@ def main(
     optimizer = fabric.setup_optimizers(optimizer)
 
     train_data, val_data = load_datasets(io, max_seq_length=model.max_seq_length)
-    train_dataloader = DataLoader(train_data, batch_size=train.micro_batch_size, num_workers=2)
-    val_dataloader = DataLoader(val_data, batch_size=train.micro_batch_size, num_workers=2)
+    train_dataloader = DataLoader(train_data, batch_size=train.micro_batch_size, num_workers=0)
+    val_dataloader = DataLoader(val_data, batch_size=train.micro_batch_size, num_workers=0)
     train_dataloader, val_dataloader = fabric.setup_dataloaders(train_dataloader, val_dataloader)
+    print(f"len(val_dataloader) = {len(val_dataloader)}")
+    print(f"len(train_dataloader) = {len(train_dataloader)}")
 
     state = {"model": model, "optimizer": optimizer, "iter_num": 0, "step_count": 0}
 
@@ -139,6 +151,7 @@ def fit(
     eval: EvalArgs,
 ) -> None:
     model = state["model"]
+    print(model)
     optimizer = state["optimizer"]
 
     validate(fabric, model, val_dataloader, max_iters=2)  # sanity check
@@ -236,25 +249,85 @@ def validate(fabric: L.Fabric, model: torch.nn.Module, val_dataloader: DataLoade
     return out
 
 
-def load_datasets(io: IOArgs, max_seq_length: int) -> Tuple["Dataset", "Dataset"]:
-    train_data = Dataset(io.train_data_dir / "train.bin", max_seq_length)
-    val_data = Dataset(io.val_data_dir / "val.bin", max_seq_length)
-    return train_data, val_data
+def load_datasets(io: IOArgs, max_seq_length: int) -> Tuple["TextDataset", "TextDataset"]:
+    with gzip.open(io.train_data_dir / "enwik8.gz") as file:
+        X = np.frombuffer(file.read(int(95e6)), dtype=np.uint8)
+        trX, vaX = np.split(X, [int(90e6)])
+        data_train, data_val = torch.from_numpy(trX), torch.from_numpy(vaX)
 
+    train_dataset = TextDataset(data_train, max_seq_length)
+    val_dataset = TextDataset(data_val, max_seq_length)
+    return train_dataset, val_dataset
 
-class Dataset(IterableDataset):
-    def __init__(self, data_file: Path, max_seq_length: int):
+class TextDataset(Dataset):
+    def __init__(self, data, seq_len):
         super().__init__()
-        self.data_file = data_file
-        self.max_seq_length = max_seq_length
+        self.data = data
+        self.seq_len = seq_len
 
-    def __iter__(self):
-        data = np.memmap(self.data_file, dtype=np.uint16, mode="r")
-        while True:
-            i = torch.randint(len(data) - self.max_seq_length, (1,)).item()
-            x = torch.from_numpy((data[i : i + self.max_seq_length]).astype(np.int64))
-            y = torch.from_numpy((data[i + 1 : i + 1 + self.max_seq_length]).astype(np.int64))
-            yield x, y
+    def __getitem__(self, index):
+        i = torch.randint(0, self.data.size(0) - self.seq_len - 1, (1,))
+        x = self.data[i : i + self.seq_len].long()
+        y = self.data[i + 1 : i + 1 + self.seq_len].long()
+        return x.cuda(), y.cuda()
+
+    def __len__(self):
+        return self.data.size(0) // self.seq_len
+
+#def cycle(loader):
+#    while True:
+#        for data in loader:
+#            yield data
+#
+#class TextSamplerDataset(Dataset):
+#    def __init__(self, data, seq_len):
+#        super().__init__()
+#        self.data = data
+#        self.seq_len = seq_len
+#
+#    def __getitem__(self, index):
+#        #rand_start = torch.randint(0, self.data.size(0) - self.seq_len - 1, (1,))
+#        #full_seq = self.data[rand_start: rand_start + self.seq_len + 1].long()
+#        #return full_seq.cuda()
+#        while True:
+#            i = torch.randint(0, self.data.size(0) - self.seq_len - 1, (1,))
+#            x = self.data[i : i + self.seq_len].long()
+#            y = self.data[i + 1 : i + 1 + self.seq_len].long()
+#            yield x.cuda(), y.cuda()
+#
+#    def __len__(self):
+#        return self.data.size(0) // self.seq_len
+
+#def load_datasets(io: IOArgs, max_seq_length: int) -> Tuple["Dataset", "Dataset"]:
+#    train_data = Dataset(io.train_data_dir / "enwik8.gz", max_seq_length)
+#    val_data = Dataset(io.val_data_dir / "enwik8.gz", max_seq_length)
+#    return train_data, val_data
+
+#class TextDataset(IterableDataset):
+#    def __init__(self, data,  max_seq_length): 
+#        super().__init__()
+#        self.this = TextSamplerDataset(data, max_seq_length)
+#        self.len = len(self.this)
+#
+#    def __iter__(self):
+#        yield self.this.__getitem__(torch.randint(0, self.len, (1,)).item())
+#
+#    def __len__(self):
+#        return self.len
+
+#class Dataset(IterableDataset):
+#    def __init__(self, data_file: Path, max_seq_length: int):
+#        super().__init__()
+#        self.data_file = data_file
+#        self.max_seq_length = max_seq_length
+#
+#    def __iter__(self):
+#        data = np.memmap(self.data_file, dtype=np.uint8, mode="r")
+#        while True:
+#            i = torch.randint(len(data) - self.max_seq_length, (1,)).item()
+#            x = torch.from_numpy((data[i : i + self.max_seq_length]).astype(np.int64))
+#            y = torch.from_numpy((data[i + 1 : i + 1 + self.max_seq_length]).astype(np.int64))
+#            yield x, y
 
 
 # learning rate decay scheduler (cosine with linear warmup)
